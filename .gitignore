@@ -1,0 +1,12 @@
+# In der Cloud / lokal erzeugt – nicht einchecken
+node_modules/
+android/
+ios/
+*.apk
+
+# Lokaler APK-Auszug & Vorschau-Hilfen
+src/
+
+# System
+.DS_Store
+Thumbs.db
