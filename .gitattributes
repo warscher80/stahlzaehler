@@ -1,0 +1,5 @@
+# Build-/Skriptdateien immer mit LF (sonst bricht der Cloud-Build an \r)
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sh    text eol=lf
+gradlew text eol=lf
