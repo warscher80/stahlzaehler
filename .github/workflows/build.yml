@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Erlaubt dem Workflow, ein Release mit der APK anzulegen
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,9 +56,20 @@ jobs:
       - name: APK umbenennen
         run: cp android/app/build/outputs/apk/debug/app-debug.apk StahlZaehler.apk
 
-      - name: APK als Download bereitstellen
+      - name: APK als Download bereitstellen (Backup-Artefakt)
         uses: actions/upload-artifact@v4
         with:
           name: StahlZaehler-APK
           path: StahlZaehler.apk
           if-no-files-found: error
+
+      - name: Release mit fester Download-URL veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: StahlZähler – Build ${{ github.run_number }}
+          body: |
+            Automatisch gebaute APK.
+            Direkt-Download (immer neueste): https://github.com/warscher80/stahlzaehler/releases/latest/download/StahlZaehler.apk
+          files: StahlZaehler.apk
+          make_latest: true
