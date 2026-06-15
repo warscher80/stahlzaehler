@@ -169,7 +169,7 @@
     <div class="num"><span id="count">–</span><small id="countSub"></small></div>
   </div>
 
-  <details class="settings">
+  <details class="settings" id="settingsBox">
     <summary>⚙️ Erkennung anpassen <span class="chev">▾</span></summary>
     <div class="row">
       <label>Empfindlichkeit <b id="sensVal">50</b></label>
@@ -196,7 +196,7 @@
 
   <button class="btn ghost" id="resetBtn" style="display:none">🗑️ Alle löschen & neu</button>
 
-  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.1</footer>
+  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.2</footer>
 </main>
 
 <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
@@ -216,6 +216,7 @@ if ('serviceWorker' in navigator) {
    count: wie gezählt wird                    'components' = zusammenhängende Flächen (Form-egal)
                                               'peaks'      = Distanz-Peaks (trennt berührende Kreise)        */
 const MATERIALS = [
+  {key:'auto',   label:'Automatik',      sub:'erkennt selbst', auto:true},
   {key:'rohre',  label:'Vierkant-Rohre', sub:'dunkle Löcher', solid:'dark',   count:'components', sens:11, min:15, max:160},
   {key:'rund',   label:'Rundstäbe',      sub:'helle Enden',   solid:'bright', count:'peaks',      sens:5,  min:34, max:130},
   {key:'sechs',  label:'Sechskant',      sub:'helle Enden',   solid:'bright', count:'peaks',      sens:5,  min:30, max:140},
@@ -223,9 +224,16 @@ const MATERIALS = [
   {key:'winkel', label:'Winkel / L',     sub:'helle Enden',   solid:'bright', count:'components', sens:6,  min:20, max:240},
 ];
 
+// Welche Erkennungs-Varianten der Automatik-Modus durchprobiert (nimmt das plausibelste Ergebnis)
+const AUTO_COMBOS = [
+  {kind:'darkComp',    dark:true,  count:'components', sens:11, min:15, max:160, name:'Rohre (Löcher)'},
+  {kind:'brightPeaks', dark:false, count:'peaks',      sens:5,  min:34, max:130, name:'Rundstäbe'},
+  {kind:'brightComp',  dark:false, count:'components', sens:6,  min:18, max:220, name:'Profile'},
+];
+
 /* ---------- State ---------- */
 let cvReady = false;
-let matKey = 'rohre';
+let matKey = 'auto';
 let points = [];                    // erkannte/gesetzte Mittelpunkte {x,y}
 let markerR = 14;                   // Radius der Marker (px im Verarbeitungsbild)
 let imgMat = null;                  // aktuelles Bild als cv.Mat (RGBA)
@@ -283,6 +291,9 @@ function buildModes(){
 }
 function applyModeDefaults(){
   const d = mat();
+  const auto = !d || d.auto;
+  $('settingsBox').style.display = auto ? 'none' : '';   // Regler sind im Auto-Modus ohne Funktion
+  if (auto) return;
   $('sens').value = d.sens;
   $('minSize').value = d.min;
   $('maxSize').value = d.max;
@@ -436,14 +447,12 @@ function stopLiveStream(keepFrame){
 /* ---------- Erkennung ----------
    Pipeline: CLAHE (Kontrastausgleich) → Threshold → Vordergrund
    → Zählung (Zusammenhangskomponenten ODER Distanz-Peaks) → Median-Ausreißerfilter.
-   Deutlich genauer als reines Konturenzählen, v.a. bei eng gepackten Bündeln. */
-function detect(){
-  if(!cvReady || !imgMat){ return; }
-  const M = mat();
-  const sens   = parseInt($('sens').value,10);
-  const minPx  = parseInt($('minSize').value,10);
-  const maxPx  = parseInt($('maxSize').value,10);
-  const dark = (M.solid==='dark');
+   Deutlich genauer als reines Konturenzählen, v.a. bei eng gepackten Bündeln.
+   computeDetect() ist parametrisiert (dunkel/hell, Zählart, Schwellen), damit der
+   Automatik-Modus mehrere Varianten durchprobieren kann. */
+function computeDetect(dark, countMode, sens, minPx, maxPx){
+  let mR = 13, cand = [], fgArea = 0;
+  if(!cvReady || !imgMat){ return {cand, markerR:mR, fgArea}; }
 
   // Arbeitsbereich: ganzes Bild oder nur die gewählte ROI
   const rx = roi? roi.x:0, ry = roi? roi.y:0;
@@ -494,11 +503,11 @@ function detect(){
       solid = bin.clone();
     }
     k.delete();
+    fgArea = cv.countNonZero(solid);   // erkannte Vordergrundfläche → für Plausibilität im Auto-Modus
 
-    let cand=[];
     const minArea = minPx*minPx, maxArea = maxPx*maxPx, roiArea = ww*hh;
 
-    if (M.count==='components') {
+    if (countMode==='components') {
       // 4a) Zusammenhangskomponenten der gefüllten Flächen – form-unabhängig.
       //     Verschmolzene Blobs werden anhand der Median-Fläche in ein Raster gesplittet.
       const nb = cv.connectedComponentsWithStats(solid, labels, stats, cent);
@@ -514,7 +523,7 @@ function detect(){
         const ar=comps.map(o=>o.area).sort((a,b)=>a-b);
         const med=ar[Math.floor(ar.length/2)];
         const s = Math.max(1, Math.sqrt(med));
-        markerR = Math.max(7, Math.round(s/2));
+        mR = Math.max(7, Math.round(s/2));
         for(const c of comps){
           let n = Math.min(60, Math.max(1, Math.round(c.area/med)));   // wie viele Stück stecken drin?
           if(n===1){ cand.push({x:c.x+rx, y:c.y+ry}); continue; }
@@ -533,7 +542,7 @@ function detect(){
             }
           }
         }
-      } else { markerR = 13; }
+      } else { mR = 13; }
 
     } else {
       // 4b) Distanztransformation + Peak-Erkennung (trennt berührende Kreise/Sechskante sauber)
@@ -560,22 +569,72 @@ function detect(){
         const rs=raw.map(o=>o.r).sort((a,b)=>a-b);
         const med=rs[Math.floor(rs.length/2)];
         raw = raw.filter(o=> o.r>med*0.4 && o.r<med*2.8);
-        markerR = Math.max(7, Math.round(med));
-      } else { markerR = 13; }
+        mR = Math.max(7, Math.round(med));
+      } else { mR = 13; }
       cand = raw.map(o=>({x:o.x, y:o.y}));
     }
-
-    points = cand;
-    if(live) overlay(); else render();
-    if(!live) toast(points.length+' erkannt – bei Bedarf antippen zum Korrigieren');
   }catch(e){
-    console.error(e); if(!live) toast('Fehler bei der Erkennung');
+    console.error(e);
   }finally{
     if(workSrc && workSrc!==imgMat) workSrc.delete();
     gray.delete(); bin.delete(); solid.delete(); dist.delete(); dil.delete(); eq.delete();
     strong.delete(); strong8.delete(); peak.delete(); contours.delete(); hier.delete();
     labels.delete(); stats.delete(); cent.delete();
   }
+  return {cand, markerR:mR, fgArea};
+}
+
+/* Erkennung orchestrieren: im Auto-Modus alle Varianten testen und das
+   plausibelste nehmen. Auswahl NICHT nach bloßer Anzahl (Rauschen erzeugt
+   sonst hunderte Schein-Treffer), sondern nach Flächenabdeckung: decken die
+   erkannten Marker die gefundene Vordergrundfläche sinnvoll ab? Schein-Peaks
+   decken fast nichts ab und fallen damit raus. */
+function pickAuto(){
+  const IDEAL = 0.8;   // erkannte Marker sollten die Vordergrundfläche ~einmal abdecken
+  const R = {};
+  AUTO_COMBOS.forEach(c=>{
+    const r = computeDetect(c.dark, c.count, c.sens, c.min, c.max);
+    const markerArea = Math.PI * r.markerR * r.markerR;
+    r.coverage = r.fgArea>0 ? (r.cand.length * markerArea) / r.fgArea : 0;
+    r.combo = c;
+    R[c.kind] = r;
+  });
+  const inBand = r => r && r.cand.length>0 && r.coverage>=0.4 && r.coverage<=1.15;
+
+  // 1) Basis = beste Komponenten-Variante (dunkle Löcher ODER helle Vollflächen) mit plausibler Abdeckung
+  const comps = [R.darkComp, R.brightComp].filter(inBand);
+  comps.sort((a,b)=> Math.abs(a.coverage-IDEAL) - Math.abs(b.coverage-IDEAL));
+  const base = comps[0] || null;
+
+  // 2) Peaks NUR, wenn sie berührende runde Enden sinnvoll trennen:
+  //    deutlich mehr Treffer als die Komponenten-Basis UND saubere Abdeckung.
+  const p = R.brightPeaks;
+  if (p && p.cand.length>0 && p.coverage>=0.6 && p.coverage<=1.1
+        && p.cand.length > 1.5 * (base ? base.cand.length : 0)) {
+    return p;
+  }
+  if (base) return base;
+
+  // 3) Fallback: irgendetwas mit Inhalt, nächste plausible Abdeckung
+  const any = [R.darkComp, R.brightPeaks, R.brightComp].filter(r=> r && r.cand.length>0);
+  if (!any.length) return R.darkComp || R.brightPeaks || R.brightComp;
+  any.sort((a,b)=> Math.abs(a.coverage-IDEAL) - Math.abs(b.coverage-IDEAL));
+  return any[0];
+}
+function detect(){
+  if(!cvReady || !imgMat){ return; }
+  const M = mat();
+  let res, label='';
+  if (M.auto){
+    const best = pickAuto();
+    res = best; label = best.combo.name + ' · ';
+  } else {
+    res = computeDetect(M.solid==='dark', M.count,
+            parseInt($('sens').value,10), parseInt($('minSize').value,10), parseInt($('maxSize').value,10));
+  }
+  points = res.cand; markerR = res.markerR;
+  if(live) overlay(); else render();
+  if(!live) toast(label + points.length + ' erkannt – bei Bedarf antippen zum Korrigieren');
 }
 
 /* ---------- Zeichnen ---------- */
