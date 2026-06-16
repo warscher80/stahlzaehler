@@ -196,7 +196,7 @@
 
   <button class="btn ghost" id="resetBtn" style="display:none">🗑️ Alle löschen & neu</button>
 
-  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.5</footer>
+  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.6</footer>
 </main>
 
 <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
@@ -463,6 +463,39 @@ function dedupePoints(pts, minDist){
   return kept;
 }
 
+// Gitter-Lücken-Auffüllung: nutzt die Regelmäßigkeit des Bündels. Schätzt
+// Spalten- (cx) und Reihenabstand (cy) getrennt und ergänzt ein Loch NUR dort,
+// wo zwei erkannte Löcher exakt in gerader Linie 2 Schritte auseinander liegen
+// und die Mitte leer ist (= ein im Glanz übersehenes Loch). Fügt nie falsche
+// Marker auf Wände, weil benachbarte Löcher (1 Schritt) ausgeschlossen sind.
+function gridFill(pts){
+  if(pts.length<8) return pts;
+  const hx=[],vy=[];
+  for(let i=0;i<pts.length;i++){ let bh=1e9,bv=1e9;
+    for(let j=0;j<pts.length;j++){ if(j===i)continue;
+      const dx=Math.abs(pts[i].x-pts[j].x), dy=Math.abs(pts[i].y-pts[j].y);
+      if(dx>=dy){ if(dx<bh)bh=dx; } else { if(dy<bv)bv=dy; } }
+    if(bh<1e9)hx.push(bh); if(bv<1e9)vy.push(bv); }
+  const med=a=>{a=a.slice().sort((x,y)=>x-y);return a[Math.floor(a.length/2)]||0;};
+  const cx=med(hx), cy=med(vy);
+  if(cx<=0||cy<=0) return pts;
+  const minc=0.6*Math.min(cx,cy);
+  const minD=(p,arr)=>{let m=1e9;for(const q of arr){const dd=Math.hypot(p.x-q.x,p.y-q.y);if(dd<m)m=dd;}return m;};
+  for(let it=0; it<3; it++){
+    const add=[];
+    for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){
+      const dx=Math.abs(pts[i].x-pts[j].x), dy=Math.abs(pts[i].y-pts[j].y);
+      const horiz = dy<0.45*cy && dx>=1.6*cx && dx<=2.5*cx;
+      const vert  = dx<0.45*cx && dy>=1.6*cy && dy<=2.5*cy;
+      if(horiz||vert){ const m={x:(pts[i].x+pts[j].x)/2,y:(pts[i].y+pts[j].y)/2};
+        if(minD(m,pts)>minc && minD(m,add)>minc) add.push(m); }
+    }
+    if(!add.length) break;
+    pts = pts.concat(add);
+  }
+  return pts;
+}
+
 function computeDetect(dark, countMode, sens, minPx, maxPx){
   let mR = 13, cand = [], fgArea = 0;
   if(!cvReady || !imgMat){ return {cand, markerR:mR, fgArea}; }
@@ -602,7 +635,8 @@ function computeDetect(dark, countMode, sens, minPx, maxPx){
     strong.delete(); strong8.delete(); peak.delete(); contours.delete(); hier.delete();
     labels.delete(); stats.delete(); cent.delete();
   }
-  cand = dedupePoints(cand, 1.3*mR);   // doppelte Marker pro Objekt entfernen
+  if(countMode==='components') cand = gridFill(cand);   // im Glanz übersehene Löcher aus dem Raster ergänzen
+  cand = dedupePoints(cand, 1.3*mR);                     // doppelte Marker pro Objekt entfernen
   return {cand, markerR:mR, fgArea};
 }
 
