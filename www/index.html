@@ -196,7 +196,7 @@
 
   <button class="btn ghost" id="resetBtn" style="display:none">🗑️ Alle löschen & neu</button>
 
-  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.2</footer>
+  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.3</footer>
 </main>
 
 <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
@@ -520,12 +520,20 @@ function computeDetect(dark, countMode, sens, minPx, maxPx){
         comps.push({x:C[i*2], y:C[i*2+1], w:S[i*5+2], h:S[i*5+3], area});
       }
       if(comps.length){
-        const ar=comps.map(o=>o.area).sort((a,b)=>a-b);
-        const med=ar[Math.floor(ar.length/2)];
+        // Robuste mittlere Objektgröße: Reflexe/Spritzer (winzige Komponenten) dürfen
+        // den Median NICHT nach unten ziehen – sonst gelten echte Löcher als "mehrfach
+        // verschmolzen" und werden fälschlich aufgesplittet (führte zu 215 statt ~60).
+        let areas = comps.map(o=>o.area).sort((a,b)=>a-b);
+        let med = areas[Math.floor(areas.length/2)] || 1;
+        for(let it=0; it<2; it++){
+          const big = areas.filter(a=> a >= 0.5*med);
+          if(big.length>=3) med = big[Math.floor(big.length/2)];
+        }
         const s = Math.max(1, Math.sqrt(med));
         mR = Math.max(7, Math.round(s/2));
         for(const c of comps){
-          let n = Math.min(60, Math.max(1, Math.round(c.area/med)));   // wie viele Stück stecken drin?
+          if(c.area < 0.30*med) continue;                                          // Spritzer/Reflex verwerfen
+          let n = (c.area >= 1.6*med) ? Math.min(60, Math.round(c.area/med)) : 1;   // nur klar Verschmolzenes splitten
           if(n===1){ cand.push({x:c.x+rx, y:c.y+ry}); continue; }
           // Rastermaße aus der Blob-Geometrie schätzen und so weiten, dass n Plätze passen
           let cols = Math.max(1, Math.round(c.w/s));
@@ -601,13 +609,14 @@ function pickAuto(){
   });
   const inBand = r => r && r.cand.length>0 && r.coverage>=0.4 && r.coverage<=1.15;
 
-  // 1) Basis = beste Komponenten-Variante (dunkle Löcher ODER helle Vollflächen) mit plausibler Abdeckung
-  const comps = [R.darkComp, R.brightComp].filter(inBand);
-  comps.sort((a,b)=> Math.abs(a.coverage-IDEAL) - Math.abs(b.coverage-IDEAL));
-  const base = comps[0] || null;
+  // 1) Dunkle Löcher haben VORRANG, wenn plausibel: das ist eine eigene Objektklasse
+  //    (Hohlrohre). Helle Peaks dürfen eine saubere Loch-Erkennung nicht überstimmen –
+  //    genau das führte sonst zu 215/339 statt ~60.
+  if (inBand(R.darkComp)) return R.darkComp;
 
-  // 2) Peaks NUR, wenn sie berührende runde Enden sinnvoll trennen:
-  //    deutlich mehr Treffer als die Komponenten-Basis UND saubere Abdeckung.
+  // 2) Sonst: helle Vollflächen als Basis. Peaks NUR, wenn sie berührende runde Enden
+  //    sinnvoll trennen (deutlich mehr Treffer als die Basis UND saubere Abdeckung).
+  const base = inBand(R.brightComp) ? R.brightComp : null;
   const p = R.brightPeaks;
   if (p && p.cand.length>0 && p.coverage>=0.6 && p.coverage<=1.1
         && p.cand.length > 1.5 * (base ? base.cand.length : 0)) {
