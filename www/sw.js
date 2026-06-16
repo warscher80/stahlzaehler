@@ -1,5 +1,5 @@
 // StahlZähler – Service Worker für Offline-Betrieb
-const CACHE = 'stahlzaehler-v5';
+const CACHE = 'stahlzaehler-v6';
 const ASSETS = [
   './',
   './index.html',

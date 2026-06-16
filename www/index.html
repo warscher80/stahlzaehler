@@ -196,7 +196,7 @@
 
   <button class="btn ghost" id="resetBtn" style="display:none">🗑️ Alle löschen & neu</button>
 
-  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.3</footer>
+  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.4</footer>
 </main>
 
 <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
@@ -450,6 +450,19 @@ function stopLiveStream(keepFrame){
    Deutlich genauer als reines Konturenzählen, v.a. bei eng gepackten Bündeln.
    computeDetect() ist parametrisiert (dunkel/hell, Zählart, Schwellen), damit der
    Automatik-Modus mehrere Varianten durchprobieren kann. */
+// Mindestabstand-Bereinigung: doppelte/zu eng liegende Marker (z.B. mehrere pro Loch
+// durch Reflexe/Glanz) zu einem zusammenfassen. Greedy, größenabhängig.
+function dedupePoints(pts, minDist){
+  if(pts.length<2 || minDist<=0) return pts;
+  const md2 = minDist*minDist, kept=[];
+  for(const p of pts){
+    let ok=true;
+    for(const q of kept){ const dx=p.x-q.x, dy=p.y-q.y; if(dx*dx+dy*dy < md2){ ok=false; break; } }
+    if(ok) kept.push(p);
+  }
+  return kept;
+}
+
 function computeDetect(dark, countMode, sens, minPx, maxPx){
   let mR = 13, cand = [], fgArea = 0;
   if(!cvReady || !imgMat){ return {cand, markerR:mR, fgArea}; }
@@ -589,6 +602,7 @@ function computeDetect(dark, countMode, sens, minPx, maxPx){
     strong.delete(); strong8.delete(); peak.delete(); contours.delete(); hier.delete();
     labels.delete(); stats.delete(); cent.delete();
   }
+  cand = dedupePoints(cand, 1.3*mR);   // doppelte Marker pro Objekt entfernen
   return {cand, markerR:mR, fgArea};
 }
 
