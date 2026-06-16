@@ -196,7 +196,7 @@
 
   <button class="btn ghost" id="resetBtn" style="display:none">🗑️ Alle löschen & neu</button>
 
-  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.4</footer>
+  <footer>Läuft offline am Gerät · keine Daten verlassen dein Handy · v1.5</footer>
 </main>
 
 <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
@@ -657,7 +657,11 @@ function detect(){
   }
   points = res.cand; markerR = res.markerR;
   if(live) overlay(); else render();
-  if(!live) toast(label + points.length + ' erkannt – bei Bedarf antippen zum Korrigieren');
+  if(!live){
+    let msg = label + points.length + ' erkannt – bei Bedarf antippen zum Korrigieren';
+    if(!roi && points.length > 120) msg = '⚠️ Sehr viele Treffer – tippe „Bereich wählen" und rahme nur das Bündel ein (sonst wird der Hintergrund mitgezählt).';
+    toast(msg);
+  }
 }
 
 /* ---------- Zeichnen ---------- */
